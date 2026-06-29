@@ -95,9 +95,11 @@ async function dbUpdateMatch(id, updates) {
 // 4. AUTENTICACIÓN
 // ============================================================
 function login(name, password) {
-  const cred = CREDENTIALS[name];
+  // Buscar el usuario ignorando mayúsculas/minúsculas
+  const key = Object.keys(CREDENTIALS).find(k => k.toLowerCase() === name.toLowerCase());
+  const cred = key ? CREDENTIALS[key] : null;
   if (!cred || cred.password !== password) return false;
-  currentUser = { name, role: cred.role };
+  currentUser = { name: key, role: cred.role }; // usar el nombre con capitalización correcta
   localStorage.setItem('polla_session', JSON.stringify(currentUser));
   return true;
 }
@@ -1165,12 +1167,13 @@ document.getElementById('login-form').addEventListener('submit', async e => {
     </div>`;
 
   try {
-    if (!initSupabase()) throw new Error('No se pudo conectar a Supabase.');
+    if (!initSupabase()) throw new Error('No se pudo inicializar Supabase. Revisa config.js.');
     await loadData();
     showApp();
   } catch (err) {
     console.error(err);
-    // Restaurar login si falla
+    // Restaurar la pantalla de login con mensaje de error
+    document.body.innerHTML = '';
     location.reload();
   }
 });
