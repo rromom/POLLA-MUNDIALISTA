@@ -160,6 +160,14 @@ function calcStatus(match) {
   return now >= lockAt ? 'cerrado' : 'proximo';
 }
 
+/** True si los penales ya están bloqueados (kickoff + 155 min) o partido finalizado */
+function isPenLocked(match) {
+  if (match.status === 'finalizado') return true;
+  if (!match.kickoff_at) return false;
+  const penLockAt = new Date(new Date(match.kickoff_at).getTime() + 155 * 60 * 1000);
+  return new Date() >= penLockAt;
+}
+
 /** Milisegundos hasta el lock (kickoff - 5 min) */
 function msToLock(match) {
   if (!match.kickoff_at) return Infinity;
@@ -192,8 +200,9 @@ function pad(n) { return String(n).padStart(2, '0'); }
  * Reglas:
  *  1. Goles acertados: min(pred_home, res_home) + min(pred_away, res_away), c/u vale 0.5 pts
  *  2. Ganador acertado: +1 (solo partidos sin empate)
- *  3. Ganador en penales acertado: +1 (si empate real Y pred empate Y acertó equipo ganador en penales)
- *  4. Penales exactos: +1 (solo si empate real Y pred empate Y marcador exacto de penales)
+ *  3. Empate acertado: +1 (independiente de penales — si pred fue empate y el partido fue a penales)
+ *  4. Ganador en penales: +1 (cualquier jugador que acierte el equipo ganador en penales)
+ *  5. Penales exactos: +1 (cualquier jugador que acierte el marcador exacto de penales)
  *
  * @param {object} pred   — { pred_home, pred_away, pred_pen_home, pred_pen_away }
  * @param {object} match  — { result_home, result_away, is_draw, pen_home, pen_away }
@@ -215,23 +224,21 @@ function calcularPuntos(pred, match) {
   const predEmpate = pred.pred_home === pred.pred_away;
 
   if (realEmpate) {
-    // Regla 3 — Ganador en penales acertado
-    if (predEmpate) {
-      const hasPredPen = pred.pred_pen_home !== null && pred.pred_pen_home !== undefined &&
-                         pred.pred_pen_away !== null && pred.pred_pen_away !== undefined &&
-                         pred.pred_pen_home !== pred.pred_pen_away;
-      if (hasPredPen) {
-        const realPenWinner = match.pen_home > match.pen_away ? 'home' : 'away';
-        const predPenWinner = pred.pred_pen_home > pred.pred_pen_away ? 'home' : 'away';
-        if (predPenWinner === realPenWinner) {
-          pts += 1;
-          // Regla 4 — Penales exactos
-          if (
-            pred.pred_pen_home === match.pen_home &&
-            pred.pred_pen_away === match.pen_away
-          ) {
-            pts += 1;
-          }
+    // Regla 3 — Empate acertado (independiente de penales)
+    if (predEmpate) pts += 1;
+
+    // Reglas 4 y 5 — Penales (cualquier jugador)
+    const hasPredPen =
+      pred.pred_pen_home !== null && pred.pred_pen_home !== undefined &&
+      pred.pred_pen_away !== null && pred.pred_pen_away !== undefined &&
+      pred.pred_pen_home !== pred.pred_pen_away;
+    if (hasPredPen && match.pen_home !== null && match.pen_away !== null) {
+      const realPenWinner = match.pen_home > match.pen_away ? 'home' : 'away';
+      const predPenWinner = pred.pred_pen_home > pred.pred_pen_away ? 'home' : 'away';
+      if (predPenWinner === realPenWinner) {
+        pts += 1; // Regla 4 — ganador penales
+        if (pred.pred_pen_home === match.pen_home && pred.pred_pen_away === match.pen_away) {
+          pts += 1; // Regla 5 — marcador exacto penales
         }
       }
     }
@@ -544,11 +551,12 @@ function renderMatchCard(match) {
   }
 
   // Sección de pronóstico
+  const penLocked = isPenLocked(match);
   let predSection = '';
   if (status === 'proximo') {
-    predSection = renderPredInput(match, myPred, false);
+    predSection = renderPredInput(match, myPred, false, false);
   } else if (status === 'cerrado') {
-    predSection = renderPredInput(match, myPred, true);
+    predSection = renderPredInput(match, myPred, true, penLocked);
   }
 
   // Mostrar todos los pronósticos cuando está cerrado o finalizado
@@ -574,20 +582,43 @@ function renderMatchCard(match) {
     </div>`;
 }
 
-function renderPredInput(match, myPred, locked) {
+function renderPredInput(match, myPred, locked, penLocked) {
   const ph  = myPred ? myPred.pred_home  : '';
   const pa  = myPred ? myPred.pred_away  : '';
   const pph = myPred ? (myPred.pred_pen_home ?? '') : '';
   const ppa = myPred ? (myPred.pred_pen_away ?? '') : '';
 
-  const isPredDraw = myPred && myPred.pred_home === myPred.pred_away;
-  const penVis = isPredDraw ? '' : 'hidden';
-  const dis = locked ? ' disabled' : '';
+  const dis    = locked    ? ' disabled' : '';
+  const disPen = penLocked ? ' disabled' : '';
   const savedHint = myPred ? '<span style="color:var(--c-accent);font-size:.72rem;">✔ Guardado</span>' : '';
 
   let lockedNotice = '';
   if (locked) {
-    lockedNotice = `<div class="locked-notice">🔒 Pronósticos cerrados — el partido está por comenzar</div>`;
+    lockedNotice = `<div class="locked-notice">🔒 Pronóstico cerrado — el partido está por comenzar</div>`;
+  }
+
+  let penNotice = '';
+  if (penLocked) {
+    penNotice = `<div class="locked-notice" style="margin-top:6px;">🔒 Penales cerrados</div>`;
+  } else if (locked) {
+    penNotice = `<div style="font-size:.72rem;color:var(--c-orange);margin-bottom:6px;">⏱ Aún puedes editar los penales hasta el min 155</div>`;
+  }
+
+  let actionsHtml = '';
+  if (!locked) {
+    actionsHtml = `
+      <div class="pred-actions">
+        <button class="btn btn-primary btn-save-pred" data-match="${match.id}">
+          Guardar pronóstico
+        </button>
+      </div>`;
+  } else if (!penLocked) {
+    actionsHtml = `
+      <div class="pred-actions">
+        <button class="btn btn-primary btn-save-pen" data-match="${match.id}">
+          Guardar penales
+        </button>
+      </div>`;
   }
 
   return `
@@ -616,8 +647,9 @@ function renderPredInput(match, myPred, locked) {
         </div>
       </div>
 
-      <div class="penalty-section pred-pen-section" id="pen-${match.id}" ${penVis}>
-        <h5>⚽ Penales (empate detectado)</h5>
+      <div class="penalty-section pred-pen-section" id="pen-${match.id}">
+        <h5>⚽ Penales</h5>
+        ${penNotice}
         <div class="score-inputs">
           <div class="score-group">
             <div class="input-label">Local</div>
@@ -626,7 +658,7 @@ function renderPredInput(match, myPred, locked) {
               data-match="${match.id}"
               value="${pph}"
               placeholder="0"
-              ${dis}>
+              ${disPen}>
           </div>
           <span class="score-vs">–</span>
           <div class="score-group">
@@ -636,17 +668,12 @@ function renderPredInput(match, myPred, locked) {
               data-match="${match.id}"
               value="${ppa}"
               placeholder="0"
-              ${dis}>
+              ${disPen}>
           </div>
         </div>
       </div>
 
-      ${!locked ? `
-        <div class="pred-actions">
-          <button class="btn btn-primary btn-save-pred" data-match="${match.id}">
-            Guardar pronóstico
-          </button>
-        </div>` : ''}
+      ${actionsHtml}
     </div>`;
 }
 
@@ -670,7 +697,7 @@ function renderAllPreds(match, preds, status) {
       </tr>`;
     }
     const scoreStr = `${p.pred_home}–${p.pred_away}`;
-    const penStr = p.pred_is_draw && p.pred_pen_home !== null
+    const penStr = p.pred_pen_home !== null && p.pred_pen_away !== null
       ? ` (pen ${p.pred_pen_home}–${p.pred_pen_away})` : '';
     const ptsClass = (p.points || 0) === 0 ? 'pred-points-zero' : 'pred-points';
     const ptsVal = status === 'finalizado' ? `${p.points ?? 0}` : '—';
@@ -701,21 +728,8 @@ function renderAllPreds(match, preds, status) {
 // 16. BIND DE EVENTOS — TARJETAS JUGADOR
 // ============================================================
 function bindMatchCardEvents(container) {
-  // Detectar empate en inputs para mostrar/ocultar penales
-  container.querySelectorAll('.pred-home, .pred-away').forEach(input => {
-    input.addEventListener('input', () => {
-      const matchId = input.dataset.match;
-      const homeVal = container.querySelector(`.pred-home[data-match="${matchId}"]`).value;
-      const awayVal = container.querySelector(`.pred-away[data-match="${matchId}"]`).value;
-      const penSec  = document.getElementById(`pen-${matchId}`);
-      if (penSec) {
-        const isDraw = homeVal !== '' && awayVal !== '' && homeVal === awayVal;
-        penSec.hidden = !isDraw;
-      }
-    });
-  });
 
-  // Guardar pronóstico
+  // ── Guardar pronóstico completo (score + penales) ──
   container.querySelectorAll('.btn-save-pred').forEach(btn => {
     btn.addEventListener('click', async () => {
       const matchId = btn.dataset.match;
@@ -727,28 +741,21 @@ function bindMatchCardEvents(container) {
         return;
       }
 
-      const ph  = parseInt(container.querySelector(`.pred-home[data-match="${matchId}"]`).value);
-      const pa  = parseInt(container.querySelector(`.pred-away[data-match="${matchId}"]`).value);
+      const ph = parseInt(container.querySelector(`.pred-home[data-match="${matchId}"]`).value);
+      const pa = parseInt(container.querySelector(`.pred-away[data-match="${matchId}"]`).value);
 
       if (isNaN(ph) || isNaN(pa) || ph < 0 || pa < 0) {
         showToast('Ingresa marcadores válidos (números ≥ 0).', 'error');
         return;
       }
 
-      const isDraw = ph === pa;
-      let pph = null, ppa = null;
-      if (isDraw) {
-        const penSec = document.getElementById(`pen-${matchId}`);
-        if (!penSec.hidden) {
-          pph = parseInt(container.querySelector(`.pred-pen-home[data-match="${matchId}"]`).value);
-          ppa = parseInt(container.querySelector(`.pred-pen-away[data-match="${matchId}"]`).value);
-          if (isNaN(pph) || isNaN(ppa)) { pph = null; ppa = null; }
-        }
-      }
+      let pph = parseInt(container.querySelector(`.pred-pen-home[data-match="${matchId}"]`).value);
+      let ppa = parseInt(container.querySelector(`.pred-pen-away[data-match="${matchId}"]`).value);
+      if (isNaN(pph) || isNaN(ppa) || pph < 0 || ppa < 0) { pph = null; ppa = null; }
 
       const homeLabel = match.team_home || 'Local';
       const awayLabel = match.team_away || 'Visitante';
-      const penLine = (isDraw && pph !== null)
+      const penLine = (pph !== null)
         ? `<br>Penales: <strong>${pph} – ${ppa}</strong>` : '';
       const modalBody = `
         <div class="modal-summary">
@@ -784,6 +791,70 @@ function bindMatchCardEvents(container) {
             updateHeaderPoints();
             renderPlayerRound(currentRound);
             showToast('Pronóstico guardado ✔', 'success');
+          } catch (err) {
+            console.error(err);
+            showToast('Error al guardar. Intenta de nuevo.', 'error');
+          } finally {
+            btn.disabled = false;
+          }
+        }
+      );
+    });
+  });
+
+  // ── Guardar solo penales (cuando score ya está cerrado) ──
+  container.querySelectorAll('.btn-save-pen').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const matchId = btn.dataset.match;
+      const match   = matches.find(m => m.id === matchId);
+
+      if (isPenLocked(match)) {
+        showToast('El tiempo para editar penales ya cerró.', 'error');
+        return;
+      }
+
+      let pph = parseInt(container.querySelector(`.pred-pen-home[data-match="${matchId}"]`).value);
+      let ppa = parseInt(container.querySelector(`.pred-pen-away[data-match="${matchId}"]`).value);
+
+      if (isNaN(pph) || isNaN(ppa) || pph < 0 || ppa < 0) {
+        showToast('Ingresa marcadores de penales válidos.', 'error');
+        return;
+      }
+
+      const homeLabel = match.team_home || 'Local';
+      const awayLabel = match.team_away || 'Visitante';
+      const modalBody = `
+        <div class="modal-summary">
+          Penales: <strong>${homeLabel} ${pph} – ${ppa} ${awayLabel}</strong>
+        </div>
+        <p>¿Confirmas tu pronóstico de penales?</p>`;
+
+      showModal(
+        { title: 'Confirmar penales', body: modalBody, confirmLabel: 'Guardar' },
+        async () => {
+          btn.disabled = true;
+          try {
+            const existing = myPreds[matchId] || {};
+            const pred = {
+              user: currentUser.name,
+              match_id: matchId,
+              pred_home:     existing.pred_home     ?? null,
+              pred_away:     existing.pred_away     ?? null,
+              pred_pen_home: pph,
+              pred_pen_away: ppa,
+              points:        existing.points        ?? 0,
+              updated_at:    new Date().toISOString(),
+            };
+            await dbUpsertPred(pred);
+            myPreds[matchId] = { ...existing, ...pred };
+
+            if (!allPreds[matchId]) allPreds[matchId] = [];
+            const existIdx = allPreds[matchId].findIndex(p => p.user === currentUser.name);
+            if (existIdx >= 0) allPreds[matchId][existIdx] = myPreds[matchId];
+            else allPreds[matchId].push(myPreds[matchId]);
+
+            renderPlayerRound(currentRound);
+            showToast('Penales guardados ✔', 'success');
           } catch (err) {
             console.error(err);
             showToast('Error al guardar. Intenta de nuevo.', 'error');
