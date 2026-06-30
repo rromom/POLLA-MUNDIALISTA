@@ -24,7 +24,7 @@ const CREDENTIALS = {
 const PLAYERS = Object.keys(CREDENTIALS).filter(k => CREDENTIALS[k].role === 'jugador');
 
 const ROUNDS = [
-  { key: 'dieciseisavos', label: '32avos de Final' },
+  { key: 'dieciseisavos', label: '16avos de Final' },
   { key: 'octavos',       label: 'Octavos de Final' },
   { key: 'cuartos',       label: 'Cuartos de Final' },
   { key: 'semifinal',     label: 'Semifinales' },
@@ -461,8 +461,7 @@ function initAdminTabs() {
 // ============================================================
 function renderPlayerRound(round) {
   const container = document.getElementById('player-content');
-  const roundMatches = matches.filter(m => m.round === round)
-    .sort((a, b) => a.order_index - b.order_index);
+  const roundMatches = matches.filter(m => m.round === round);
 
   if (roundMatches.length === 0) {
     container.innerHTML = `
@@ -473,7 +472,33 @@ function renderPlayerRound(round) {
     return;
   }
 
-  container.innerHTML = roundMatches.map(m => renderMatchCard(m)).join('');
+  const finalizados = roundMatches
+    .filter(m => calcStatus(m) === 'finalizado')
+    .sort((a, b) => a.order_index - b.order_index);
+
+  const pendientes = roundMatches
+    .filter(m => calcStatus(m) !== 'finalizado')
+    .sort((a, b) => {
+      const ta = a.kickoff_at ? new Date(a.kickoff_at).getTime() : Infinity;
+      const tb = b.kickoff_at ? new Date(b.kickoff_at).getTime() : Infinity;
+      return ta - tb;
+    });
+
+  let html = '';
+
+  if (finalizados.length > 0) {
+    html += `<div class="section-label">✔ Finalizados</div>`;
+    html += finalizados.map(m => renderMatchCard(m)).join('');
+  }
+
+  if (pendientes.length > 0) {
+    if (finalizados.length > 0) {
+      html += `<div class="section-label">🗓 Próximos</div>`;
+    }
+    html += pendientes.map(m => renderMatchCard(m)).join('');
+  }
+
+  container.innerHTML = html;
   bindMatchCardEvents(container);
 }
 

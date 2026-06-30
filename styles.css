@@ -387,6 +387,18 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
   font-weight: 700;
 }
 
+/* Section labels (Finalizados / Próximos) */
+.section-label {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--c-muted);
+  padding: 8px 4px 4px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--c-border);
+}
+
 /* Penalties sub-section */
 .penalty-section {
   background: var(--c-surface2);
