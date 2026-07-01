@@ -200,9 +200,10 @@ function pad(n) { return String(n).padStart(2, '0'); }
  * Reglas:
  *  1. Goles acertados: min(pred_home, res_home) + min(pred_away, res_away), c/u vale 0.5 pts
  *  2. Ganador acertado: +1 (solo partidos sin empate)
- *  3. Empate acertado: +1 (independiente de penales — si pred fue empate y el partido fue a penales)
- *  4. Ganador en penales: +1 (cualquier jugador que acierte el equipo ganador en penales)
- *  5. Penales exactos: +1 (cualquier jugador que acierte el marcador exacto de penales)
+ *  3. Marcador exacto: +1 (si pred_home === result_home Y pred_away === result_away)
+ *  4. Empate acertado: +1 (independiente de penales — si pred fue empate y el partido fue a penales)
+ *  5. Ganador en penales: +1 (cualquier jugador que acierte el equipo ganador en penales)
+ *  6. Penales exactos: +1 (cualquier jugador que acierte el marcador exacto de penales)
  *
  * @param {object} pred   — { pred_home, pred_away, pred_pen_home, pred_pen_away }
  * @param {object} match  — { result_home, result_away, is_draw, pen_home, pen_away }
@@ -219,6 +220,11 @@ function calcularPuntos(pred, match) {
     Math.min(pred.pred_home, match.result_home) +
     Math.min(pred.pred_away, match.result_away);
   pts += golesAcertados * 0.5;
+
+  // Regla 3 — Marcador exacto
+  if (pred.pred_home === match.result_home && pred.pred_away === match.result_away) {
+    pts += 1;
+  }
 
   const realEmpate = !!match.is_draw;
   const predEmpate = pred.pred_home === pred.pred_away;
